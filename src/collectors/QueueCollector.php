@@ -35,23 +35,27 @@ class QueueCollector
         }
 
         try {
+            // The queue table tracks push moments as unix timestamps in
+            // timePushed (there is no dateCreated column). Jobs with a
+            // delay only count once they are ready to run.
+            // Queue::$channel is null by default; Craft's private channel()
+            // falls back to the component id, which is 'queue' for the
+            // default app component.
             $oldest = (new Query())
                 ->from(Table::QUEUE)
                 ->where([
-                    'channel' => $queue->channel,
+                    'channel' => $queue->channel ?? 'queue',
                     'fail' => false,
                     'dateReserved' => null,
                 ])
-                ->min('[[dateCreated]]');
+                ->andWhere('[[timePushed]] + [[delay]] <= :now', [':now' => time()])
+                ->min('[[timePushed]] + [[delay]]');
 
             if (! $oldest) {
                 return 0;
             }
 
-            // Craft stores dates in UTC.
-            $age = time() - (new \DateTime($oldest, new \DateTimeZone('UTC')))->getTimestamp();
-
-            return max(0, (int) floor($age / 60));
+            return max(0, (int) floor((time() - (int) $oldest) / 60));
         } catch (\Throwable) {
             return 0;
         }
