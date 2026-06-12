@@ -1,19 +1,19 @@
 Copyright (c) 2026 Sustainable Developer (Niek ten Hoopen)
 All rights reserved.
 
-This software is proprietary. Use in production environments requires a valid
-license obtained through the Craft Plugin Store:
-https://plugins.craftcms.com
+This software is proprietary. It is built for websites managed by
+Sustainable Developer and connects to the Sustdev Insights monitoring
+platform.
 
-Permitted without a license:
+Permitted:
 - Inspection of source code
-- Local development and testing environments
-- Continuous integration and staging environments
+- Use on websites managed by or in cooperation with Sustainable Developer
+- Local development, testing, continuous integration and staging
+  environments for those websites
 
-Prohibited without a valid license:
-- Use in production environments
+Prohibited without written permission:
+- Use in any other production environment
 - Redistribution, sublicensing, or resale
-- Removal or modification of license validation code
 - Creating derivative works for distribution
 
 This software is provided "AS IS", without warranty of any kind, express or

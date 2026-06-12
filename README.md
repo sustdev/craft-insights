@@ -1,6 +1,6 @@
 # Sustdev Insights for Craft CMS
 
-Exposes a metrics endpoint for the [Sustdev Insights](https://github.com/sustdev/insights) monitoring platform: queue health, form submissions and Freeform errors. No control panel section; the plugin does one thing.
+Exposes a metrics endpoint for the Sustdev Insights monitoring platform of [Sustainable Developer](https://sust.dev): queue health, form submissions and Freeform errors. No control panel section; the plugin does one thing.
 
 ## Endpoint
 
