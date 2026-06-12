@@ -42,14 +42,18 @@ ddev composer require sustdev/craft-insights
 ddev craft plugin/install insights
 ```
 
-## Configuration
+## Connecting a site
 
-Copy `src/config.php` to `config/insights.php`:
+The plugin generates a shared secret on install. Open **Utilities, Sustdev Insights** in the control panel, copy the secret, and paste it in the Insights platform under Site settings, Data sources, Craft plugin. No server access needed.
+
+The secret lives in the plugin's own database table, deliberately outside plugin settings (those end up in project config and therefore in git).
+
+### Optional: secret via environment
+
+An env-configured secret overrides the generated one. Copy `src/config.php` to `config/insights.php`:
 
 ```php
 return [
     'secret' => \craft\helpers\App::env('INSIGHTS_SECRET'),
 ];
 ```
-
-Set `INSIGHTS_SECRET` in the site's `.env`, and enter the same secret in the Insights platform under Site settings, Data sources, Craft plugin.

@@ -3,7 +3,6 @@
 namespace sustdev\insights\controllers;
 
 use Craft;
-use craft\helpers\App;
 use craft\web\Controller;
 use sustdev\insights\collectors\FreeformCollector;
 use sustdev\insights\collectors\QueueCollector;
@@ -43,12 +42,10 @@ class MetricsController extends Controller
             return;
         }
 
-        /** @var \sustdev\insights\models\Settings $settings */
-        $settings = Plugin::$plugin->getSettings();
-        $secret = App::parseEnv($settings->secret);
+        $secret = Plugin::$plugin->secret->get();
 
         if (! $secret) {
-            throw new ServiceUnavailableHttpException('No insights secret configured.');
+            throw new ServiceUnavailableHttpException('No insights secret available.');
         }
 
         $header = $this->request->getHeaders()->get('X-Insights-Secret');
