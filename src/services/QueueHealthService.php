@@ -10,17 +10,22 @@ use sustdev\insights\jobs\QueueHealthJob;
 use yii\base\Component;
 
 /**
- * Keeps a single queue heartbeat (canary) cycling. The job re-schedules itself
- * (scheduleNext), and the console command and the metrics endpoint re-seed the
- * chain if it ever stops (ensure), so the heartbeat survives a deploy, a cache
- * clear, or a worker that died and came back. A site needs no cron; an
- * optional cron is just a third caller of ensure(). ensure() is mutex-guarded
- * and the canary never fails, so the chain stays at one.
+ * Keeps the queue heartbeat (canary) running, on any queue driver.
  *
- * Requires Craft's database queue (the default). On another driver the queue
- * table cannot be inspected to tell whether a heartbeat is already pending, so
- * re-seeding would have no safe dedup and could fork the chain; there the
- * heartbeat simply does not run and QueueCollector reports a warning.
+ * On Craft's database queue the canary re-schedules itself every interval
+ * (scheduleNext), so the heartbeat stays fresh with no cron, and the queue
+ * table gives an exact "is one already pending" check so the chain never
+ * forks.
+ *
+ * Other drivers (Redis, ...) cannot be inspected for a specific pending job,
+ * so the canary does NOT self-requeue there; ensure() drives it instead, from
+ * the metrics poll and an optional cron. Because nothing self-requeues on
+ * those drivers, a duplicate canary is harmless (it just stamps the cache
+ * again), so a best-effort cache flag is enough to throttle re-seeding. Such a
+ * site should add the cron for a tight 5-minute heartbeat; on the poll alone a
+ * healthy site refreshes at the poll cadence.
+ *
+ * ensure() is mutex-guarded so overlapping callers cannot both seed.
  */
 class QueueHealthService extends Component
 {
@@ -33,32 +38,32 @@ class QueueHealthService extends Component
 
     private const SEED_MUTEX = 'insights-queue-heartbeat-seed';
 
+    /** Best-effort "a canary is in flight" flag for non-database drivers. */
+    private const SCHEDULED_CACHE_KEY = 'insights-queue-heartbeat-scheduled';
+
     /** Low number = runs first, so the canary jumps ahead of a normal backlog. */
     private const PRIORITY = 1;
 
     /**
-     * Continue the chain: schedule the next heartbeat after the interval.
+     * Continue the chain on the database queue, where the exact dedup keeps it
+     * single. A no-op on other drivers, which are driven by ensure() instead.
      */
     public function scheduleNext(): void
     {
-        if ($this->supported()) {
+        if ($this->usesDatabaseQueue()) {
             $this->push(self::INTERVAL);
         }
     }
 
     /**
-     * Seed the chain if it is not already running. Runs the first heartbeat
-     * immediately (no delay) so the stamp is fresh at once. A no-op when a
-     * heartbeat is already queued, delayed, or being processed.
+     * Seed the heartbeat if one is not already pending. Runs immediately (no
+     * delay) so the stamp is fresh at once. The database driver checks the
+     * queue table exactly; other drivers fall back to the cache flag.
      */
     public function ensure(): void
     {
-        if (! $this->supported()) {
-            return;
-        }
-
         // Guard the check-then-push: two overlapping polls (or a poll racing
-        // the cron) would otherwise both see an empty chain and both seed it.
+        // the cron) would otherwise both see nothing pending and both seed it.
         $mutex = Craft::$app->getMutex();
 
         if (! $mutex->acquire(self::SEED_MUTEX)) {
@@ -66,17 +71,12 @@ class QueueHealthService extends Component
         }
 
         try {
-            if (! $this->isQueued()) {
+            if (! $this->isPending()) {
                 $this->push();
             }
         } finally {
             $mutex->release(self::SEED_MUTEX);
         }
-    }
-
-    private function supported(): bool
-    {
-        return Craft::$app->getQueue() instanceof DatabaseQueue;
     }
 
     private function push(int $delaySeconds = 0): void
@@ -85,13 +85,30 @@ class QueueHealthService extends Component
             ->delay($delaySeconds)
             ->priority(self::PRIORITY)
             ->push(new QueueHealthJob());
+
+        // For the non-database fallback in isPending(). It only throttles
+        // re-seeding; if it lapses, the worst case is an extra canary that
+        // stamps the cache and exits, since non-database drivers do not
+        // self-requeue and so cannot fork a chain.
+        Craft::$app->getCache()->set(self::SCHEDULED_CACHE_KEY, true, self::INTERVAL);
     }
 
-    private function isQueued(): bool
+    private function isPending(): bool
     {
-        return (new Query())
-            ->from(Table::QUEUE)
-            ->where(['description' => QueueHealthJob::DESCRIPTION, 'fail' => false])
-            ->exists();
+        // The database driver is the source of truth: is a heartbeat row
+        // already waiting? Exact, so the self-requeue chain never forks.
+        if ($this->usesDatabaseQueue()) {
+            return (new Query())
+                ->from(Table::QUEUE)
+                ->where(['description' => QueueHealthJob::DESCRIPTION, 'fail' => false])
+                ->exists();
+        }
+
+        return Craft::$app->getCache()->get(self::SCHEDULED_CACHE_KEY) !== false;
+    }
+
+    private function usesDatabaseQueue(): bool
+    {
+        return Craft::$app->getQueue() instanceof DatabaseQueue;
     }
 }

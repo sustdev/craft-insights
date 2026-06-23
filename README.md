@@ -37,17 +37,19 @@ A pending count or the age of the oldest job cannot tell a stalled worker apart 
 
 - `status` is `failed` when the worker has not run the heartbeat for `queueStallMinutes` (default 15), or when there are failed jobs; `warning` when there is no heartbeat yet (fresh install or a just-cleared cache); otherwise `ok`.
 - The threshold is per site. Copy `src/config.php` to `config/insights.php` and set `queueStallMinutes`. Raise it on a site with legitimately long-running jobs.
-- Requires Craft's database queue (the default) and a cache shared between web and worker (file, database, or Redis, not the per-request array cache). On another queue driver the heartbeat does not run and the check stays a `warning`.
+- Needs a cache shared between web and worker (file, database, or Redis, not the per-request array cache).
 
-### No cron required
+### Cron
 
-The canary re-schedules itself every 5 minutes, and the metrics endpoint re-seeds it if the chain ever stops (after a deploy, a cache clear, or a worker that died and came back). Since the platform polls the endpoint on a schedule, the check works on a site without any cron.
+On Craft's **database queue** (the default) no cron is needed: the canary re-schedules itself every 5 minutes, and the metrics endpoint re-seeds it if the chain ever stops (after a deploy, a cache clear, or a worker that died and came back).
 
-A site that wants an independent metronome can add one; it just calls the same idempotent re-seed:
+On **another queue driver** (Redis, ...) the canary does not self-requeue, because those drivers cannot be inspected to dedup a pending heartbeat safely. There the heartbeat is driven by the metrics poll, so a healthy site refreshes only at the poll cadence; add the cron for a tight 5-minute heartbeat:
 
 ```
 */5 * * * * php craft insights/queue-health/run
 ```
+
+It calls an idempotent re-seed, so it is also a harmless extra metronome on the database queue.
 
 ## Installation
 
