@@ -9,4 +9,9 @@ use craft\helpers\App;
  */
 return [
     'secret' => App::env('INSIGHTS_SECRET'),
+
+    // Fail the queue health check when the worker has not processed the
+    // heartbeat job for this many minutes. Raise it on a site with
+    // legitimately long-running jobs.
+    'queueStallMinutes' => 15,
 ];

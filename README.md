@@ -13,7 +13,13 @@ Response:
 
 ```json
 {
-    "queue": { "pending": 2, "failed": 0, "oldestPendingMinutes": 1 },
+    "queue": {
+        "status": "ok",
+        "message": "Worker active, last heartbeat 2m ago; 0 pending.",
+        "pending": 0,
+        "failed": 0,
+        "minutesSinceHeartbeat": 2
+    },
     "forms": [
         { "handle": "contact", "name": "Contact", "submissions24h": 3, "submissions7d": 18 }
     ],
@@ -21,9 +27,26 @@ Response:
 }
 ```
 
-- `queue`: counts from Craft's queue. `oldestPendingMinutes` is the age of the oldest waiting job (database queue driver only; other drivers report 0).
+- `queue`: the plugin decides queue health and reports the verdict (`status`: `ok`, `warning` or `failed`) plus a `message`. The platform stores that directly. `pending`/`failed` are Craft's counts; `minutesSinceHeartbeat` is the age of the last heartbeat (null until the first one runs). See **Queue health** below.
 - `forms` and `freeform.errors7d`: via Freeform when installed (spam and hidden submissions excluded; errors counted from Freeform's log files over the last 7 days). Sites without Freeform report an empty list and 0.
 - Wrong or missing secret returns 403; an unconfigured secret returns 503. The platform treats any non-2xx as a failed sync. Logged-in admins can open the endpoint in the browser without the header.
+
+## Queue health
+
+A pending count or the age of the oldest job cannot tell a stalled worker apart from a large but healthy backlog (a Blitz cache warm queues hundreds of jobs the worker is steadily clearing). So health is a heartbeat instead: a lightweight, high-priority canary job stamps the cache when the worker runs it. If the worker is dead or hung, the stamp goes stale and the check fails.
+
+- `status` is `failed` when the worker has not run the heartbeat for `queueStallMinutes` (default 15), or when there are failed jobs; `warning` when there is no heartbeat yet (fresh install or a just-cleared cache); otherwise `ok`.
+- The threshold is per site. Copy `src/config.php` to `config/insights.php` and set `queueStallMinutes`. Raise it on a site with legitimately long-running jobs.
+
+### No cron required
+
+The canary re-schedules itself every 5 minutes, and the metrics endpoint re-seeds it if the chain ever stops (after a deploy, a cache clear, or a worker that died and came back). Since the platform polls the endpoint on a schedule, the check works on a site without any cron.
+
+A site that wants an independent metronome can add one; it just calls the same idempotent re-seed:
+
+```
+*/5 * * * * php craft insights/queue-health/run
+```
 
 ## Installation
 

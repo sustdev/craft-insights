@@ -13,10 +13,20 @@ class Settings extends Model
      */
     public ?string $secret = null;
 
+    /**
+     * Fail the queue health check when the worker has not processed the
+     * heartbeat job for this many minutes. The heartbeat refreshes every
+     * 5 minutes, so the default leaves room for a short backlog; raise it
+     * on a site with legitimately long-running jobs. Set in
+     * config/insights.php.
+     */
+    public int $queueStallMinutes = 15;
+
     public function defineRules(): array
     {
         return [
             [['secret'], 'string'],
+            [['queueStallMinutes'], 'integer', 'min' => 1],
         ];
     }
 }
