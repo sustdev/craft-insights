@@ -18,6 +18,12 @@ class QueueHealthJob extends BaseJob
 {
     public const CACHE_KEY = 'insights-queue-heartbeat';
 
+    /**
+     * Stored verbatim in the queue's description column and used by
+     * QueueHealthService to find a pending heartbeat. Must stay a plain
+     * literal: do not wrap it in Craft::t()/Translation::prep(), or the stored
+     * value would diverge from this constant and the dedup would break.
+     */
     public const DESCRIPTION = 'Insights queue heartbeat';
 
     public function execute($queue): void

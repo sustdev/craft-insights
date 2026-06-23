@@ -25,7 +25,11 @@ class QueueCollector
         $pending = method_exists($queue, 'getTotalWaiting') ? (int) $queue->getTotalWaiting() : 0;
         $failed = method_exists($queue, 'getTotalFailed') ? (int) $queue->getTotalFailed() : 0;
 
-        $threshold = (int) Plugin::getInstance()->getSettings()->queueStallMinutes;
+        // Floor at 6 minutes: it must exceed the 5-minute heartbeat interval or
+        // the stamp is always older than the threshold and the check fails
+        // itself. The Settings rule enforces this for CP/programmatic writes,
+        // but a config/insights.php override skips validation, so clamp here.
+        $threshold = max(6, (int) Plugin::getInstance()->getSettings()->queueStallMinutes);
         $beat = Craft::$app->getCache()->get(QueueHealthJob::CACHE_KEY);
         $secondsSince = $beat === false ? null : max(0, time() - (int) $beat);
 

@@ -95,12 +95,16 @@ class QueueHealthService extends Component
 
     private function isPending(): bool
     {
+        $queue = Craft::$app->getQueue();
+
         // The database driver is the source of truth: is a heartbeat row
-        // already waiting? Exact, so the self-requeue chain never forks.
-        if ($this->usesDatabaseQueue()) {
+        // already waiting? Exact, so the self-requeue chain never forks. Scope
+        // to the queue's channel so a second queue channel's rows are not
+        // mistaken for a pending heartbeat on this one.
+        if ($queue instanceof DatabaseQueue) {
             return (new Query())
                 ->from(Table::QUEUE)
-                ->where(['description' => QueueHealthJob::DESCRIPTION, 'fail' => false])
+                ->where(['channel' => $queue->channel ?? 'queue', 'description' => QueueHealthJob::DESCRIPTION, 'fail' => false])
                 ->exists();
         }
 

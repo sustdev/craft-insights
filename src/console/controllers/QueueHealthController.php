@@ -8,11 +8,10 @@ use yii\console\ExitCode;
 use yii\helpers\BaseConsole;
 
 /**
- * Optional metronome for the queue heartbeat. The chain re-schedules itself
- * and the metrics endpoint re-seeds it, so a cron is not required; this gives
- * a site that wants one an independent push:
- *
- *   * /5 * * * * php craft insights/queue-health/run
+ * Metronome for the queue heartbeat: `insights/queue-health/run` re-seeds it.
+ * On the database queue the chain re-schedules itself so a cron is optional;
+ * on other drivers run this every 5 minutes for a tight heartbeat. See the
+ * README cron snippet.
  */
 class QueueHealthController extends Controller
 {
