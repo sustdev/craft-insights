@@ -27,9 +27,10 @@ class QueueCollector
 
         $threshold = (int) Plugin::getInstance()->getSettings()->queueStallMinutes;
         $beat = Craft::$app->getCache()->get(QueueHealthJob::CACHE_KEY);
-        $minutesSince = $beat === false ? null : max(0, (int) floor((time() - (int) $beat) / 60));
+        $secondsSince = $beat === false ? null : max(0, time() - (int) $beat);
 
-        [$status, $message] = $this->verdict($pending, $failed, $threshold, $minutesSince);
+        [$status, $message] = $this->verdict($pending, $failed, $threshold, $secondsSince);
+        $minutesSince = $secondsSince === null ? null : intdiv($secondsSince, 60);
 
         return [
             'status' => $status,
@@ -41,14 +42,17 @@ class QueueCollector
     }
 
     /**
-     * @return array{0: string, 1: string} The Oh Dear-style status and a short message.
+     * @return array{0: string, 1: string} The status (ok/warning/failed) and a short message.
      */
-    private function verdict(int $pending, int $failed, int $threshold, ?int $minutesSince): array
+    private function verdict(int $pending, int $failed, int $threshold, ?int $secondsSince): array
     {
+        // Compare in seconds for a sharp boundary; report whole minutes.
+        $minutes = $secondsSince === null ? null : intdiv($secondsSince, 60);
+
         // A stalled worker is the worst case: the canary has not run in time,
         // so nothing in the queue is moving.
-        if ($minutesSince !== null && $minutesSince >= $threshold) {
-            return ['failed', "Queue worker idle for {$minutesSince}m (limit {$threshold}m); {$pending} pending."];
+        if ($secondsSince !== null && $secondsSince >= $threshold * 60) {
+            return ['failed', "Queue worker idle for {$minutes}m (limit {$threshold}m); {$pending} pending."];
         }
 
         if ($failed > 0) {
@@ -57,10 +61,10 @@ class QueueCollector
 
         // No stamp yet: a fresh install, or the cache was just cleared. The
         // canary will run shortly, so this is a heads-up, not an outage.
-        if ($minutesSince === null) {
+        if ($secondsSince === null) {
             return ['warning', 'No queue heartbeat yet (just installed or cache cleared).'];
         }
 
-        return ['ok', "Worker active, last heartbeat {$minutesSince}m ago; {$pending} pending."];
+        return ['ok', "Worker active, last heartbeat {$minutes}m ago; {$pending} pending."];
     }
 }

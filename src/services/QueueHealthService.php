@@ -9,17 +9,24 @@ use sustdev\insights\jobs\QueueHealthJob;
 use yii\base\Component;
 
 /**
- * Keeps exactly one queue heartbeat (canary) cycling. Three callers feed in,
- * all idempotent: the job re-schedules itself (scheduleNext), and the console
- * command and the metrics endpoint re-seed the chain if it ever stops
- * (ensure), so the heartbeat survives a deploy, a cache clear, or a worker
- * that died and came back. A site needs no cron; an optional cron is just a
- * fourth caller of ensure().
+ * Keeps a single queue heartbeat (canary) cycling. The job re-schedules itself
+ * (scheduleNext), and the console command and the metrics endpoint re-seed the
+ * chain if it ever stops (ensure), so the heartbeat survives a deploy, a cache
+ * clear, or a worker that died and came back. A site needs no cron; an
+ * optional cron is just a third caller of ensure(). ensure() is mutex-guarded
+ * and the canary never fails, so the chain stays at one in practice rather
+ * than forking under concurrent re-seeds.
  */
 class QueueHealthService extends Component
 {
-    /** Seconds between heartbeats, so the stamp stays fresh without a cron. */
+    /**
+     * Seconds between heartbeats, so the stamp stays fresh without a cron.
+     * Keep this comfortably below queueStallMinutes * 60, or the check would
+     * fail itself: the stamp would always be older than the threshold.
+     */
     public const INTERVAL = 300;
+
+    private const SEED_MUTEX = 'insights-queue-heartbeat-seed';
 
     /** Low number = runs first, so the canary jumps ahead of a normal backlog. */
     private const PRIORITY = 1;
@@ -29,10 +36,7 @@ class QueueHealthService extends Component
      */
     public function scheduleNext(): void
     {
-        Craft::$app->getQueue()
-            ->delay(self::INTERVAL)
-            ->priority(self::PRIORITY)
-            ->push(new QueueHealthJob());
+        $this->push(self::INTERVAL);
     }
 
     /**
@@ -42,11 +46,27 @@ class QueueHealthService extends Component
      */
     public function ensure(): void
     {
-        if ($this->isQueued()) {
+        // Guard the check-then-push: two overlapping polls (or a poll racing
+        // the cron) would otherwise both see an empty chain and both seed it.
+        $mutex = Craft::$app->getMutex();
+
+        if (! $mutex->acquire(self::SEED_MUTEX)) {
             return;
         }
 
+        try {
+            if (! $this->isQueued()) {
+                $this->push();
+            }
+        } finally {
+            $mutex->release(self::SEED_MUTEX);
+        }
+    }
+
+    private function push(int $delaySeconds = 0): void
+    {
         Craft::$app->getQueue()
+            ->delay($delaySeconds)
             ->priority(self::PRIORITY)
             ->push(new QueueHealthJob());
     }

@@ -26,7 +26,10 @@ class Settings extends Model
     {
         return [
             [['secret'], 'string'],
-            [['queueStallMinutes'], 'integer', 'min' => 1],
+            // Must exceed the 5-minute heartbeat interval, or the stamp would
+            // always read as older than the threshold and the check would
+            // fail itself.
+            [['queueStallMinutes'], 'integer', 'min' => 6],
         ];
     }
 }
