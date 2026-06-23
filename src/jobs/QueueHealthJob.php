@@ -23,10 +23,12 @@ class QueueHealthJob extends BaseJob
     public function execute($queue): void
     {
         try {
-            // No TTL: the stamp must stay readable so its age can be computed.
-            // A TTL shorter than the stall threshold would expire it to "no
-            // heartbeat" and mask an outage as a warning.
-            Craft::$app->getCache()->set(self::CACHE_KEY, (int) DateTimeHelper::currentUTCDateTime()->format('U'));
+            // Duration 0 = never expire. Craft sets the cache component's
+            // defaultDuration from general.cacheDuration (a day by default), so
+            // without an explicit 0 the stamp would expire on a worker that has
+            // been down longer than that and the outage would read as "no
+            // heartbeat" (warning) instead of a stall (failed).
+            Craft::$app->getCache()->set(self::CACHE_KEY, (int) DateTimeHelper::currentUTCDateTime()->format('U'), 0);
 
             // Keep the chain alive: schedule the next heartbeat. Pushed before
             // this job finishes, so a healthy worker always has the next one
