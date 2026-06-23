@@ -15,8 +15,12 @@ use yii\base\Component;
  * chain if it ever stops (ensure), so the heartbeat survives a deploy, a cache
  * clear, or a worker that died and came back. A site needs no cron; an
  * optional cron is just a third caller of ensure(). ensure() is mutex-guarded
- * and the canary never fails, so the chain stays at one in practice rather
- * than forking under concurrent re-seeds.
+ * and the canary never fails, so the chain stays at one.
+ *
+ * Requires Craft's database queue (the default). On another driver the queue
+ * table cannot be inspected to tell whether a heartbeat is already pending, so
+ * re-seeding would have no safe dedup and could fork the chain; there the
+ * heartbeat simply does not run and QueueCollector reports a warning.
  */
 class QueueHealthService extends Component
 {
@@ -29,13 +33,6 @@ class QueueHealthService extends Component
 
     private const SEED_MUTEX = 'insights-queue-heartbeat-seed';
 
-    /**
-     * Fallback "a canary is in flight" flag for non-database queue drivers,
-     * where the queue table cannot be inspected. Expires on its own so a
-     * stopped chain re-seeds.
-     */
-    private const SCHEDULED_CACHE_KEY = 'insights-queue-heartbeat-scheduled';
-
     /** Low number = runs first, so the canary jumps ahead of a normal backlog. */
     private const PRIORITY = 1;
 
@@ -44,16 +41,22 @@ class QueueHealthService extends Component
      */
     public function scheduleNext(): void
     {
-        $this->push(self::INTERVAL);
+        if ($this->supported()) {
+            $this->push(self::INTERVAL);
+        }
     }
 
     /**
      * Seed the chain if it is not already running. Runs the first heartbeat
      * immediately (no delay) so the stamp is fresh at once. A no-op when a
-     * heartbeat is already scheduled or in flight.
+     * heartbeat is already queued, delayed, or being processed.
      */
     public function ensure(): void
     {
+        if (! $this->supported()) {
+            return;
+        }
+
         // Guard the check-then-push: two overlapping polls (or a poll racing
         // the cron) would otherwise both see an empty chain and both seed it.
         $mutex = Craft::$app->getMutex();
@@ -63,12 +66,17 @@ class QueueHealthService extends Component
         }
 
         try {
-            if (! $this->isScheduled()) {
+            if (! $this->isQueued()) {
                 $this->push();
             }
         } finally {
             $mutex->release(self::SEED_MUTEX);
         }
+    }
+
+    private function supported(): bool
+    {
+        return Craft::$app->getQueue() instanceof DatabaseQueue;
     }
 
     private function push(int $delaySeconds = 0): void
@@ -77,30 +85,13 @@ class QueueHealthService extends Component
             ->delay($delaySeconds)
             ->priority(self::PRIORITY)
             ->push(new QueueHealthJob());
-
-        // For the non-database fallback below: outlive this canary's delay plus
-        // a full interval, so the flag holds while a healthy chain re-pushes
-        // but lapses if it stops.
-        Craft::$app->getCache()->set(self::SCHEDULED_CACHE_KEY, true, $delaySeconds + self::INTERVAL * 2);
     }
 
-    private function isScheduled(): bool
+    private function isQueued(): bool
     {
-        $queue = Craft::$app->getQueue();
-
-        // The database driver lets us check exactly whether a heartbeat is
-        // already pending. That self-heals (a dropped chain re-seeds) without
-        // accumulating duplicates that would fork the chain on recovery.
-        if ($queue instanceof DatabaseQueue) {
-            return (new Query())
-                ->from(Table::QUEUE)
-                ->where(['description' => QueueHealthJob::DESCRIPTION, 'fail' => false])
-                ->exists();
-        }
-
-        // Other drivers (Redis, ...) store jobs elsewhere, so the table query
-        // would never see the heartbeat and every poll would push another.
-        // Fall back to the cache flag set when a canary is pushed.
-        return Craft::$app->getCache()->get(self::SCHEDULED_CACHE_KEY) !== false;
+        return (new Query())
+            ->from(Table::QUEUE)
+            ->where(['description' => QueueHealthJob::DESCRIPTION, 'fail' => false])
+            ->exists();
     }
 }
