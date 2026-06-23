@@ -14,6 +14,14 @@ class Install extends Migration
 {
     public function safeUp(): bool
     {
+        // Reinstalls and shared database dumps can leave the table behind
+        // while Craft no longer considers the plugin installed. Recreating
+        // it unconditionally then aborts the whole project config apply, so
+        // skip creation when it already exists and keep the existing secret.
+        if ($this->db->tableExists('{{%insights}}')) {
+            return true;
+        }
+
         $this->createTable('{{%insights}}', [
             'id' => $this->primaryKey(),
             'secret' => $this->string()->notNull(),
