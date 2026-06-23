@@ -7,6 +7,7 @@ use craft\base\Plugin as BasePlugin;
 use craft\events\RegisterComponentTypesEvent;
 use craft\services\Utilities;
 use sustdev\insights\models\Settings;
+use sustdev\insights\services\QueueHealthService;
 use sustdev\insights\services\SecretService;
 use sustdev\insights\utilities\SecretUtility;
 use yii\base\Event;
@@ -18,6 +19,7 @@ use yii\base\Event;
  * value overrides it.
  *
  * @property-read SecretService $secret
+ * @property-read QueueHealthService $queueHealth
  */
 class Plugin extends BasePlugin
 {
@@ -37,6 +39,7 @@ class Plugin extends BasePlugin
 
         $this->setComponents([
             'secret' => SecretService::class,
+            'queueHealth' => QueueHealthService::class,
         ]);
 
         Event::on(

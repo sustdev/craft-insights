@@ -26,6 +26,12 @@ class MetricsController extends Controller
     {
         $this->ensureSecretIsValid();
 
+        // Re-seed the heartbeat if its chain has stopped (after a deploy, a
+        // cache clear, or a worker that died and came back). The platform
+        // polls this endpoint on a schedule, so this keeps the queue check
+        // working on a site without a cron.
+        Plugin::getInstance()->queueHealth->ensure();
+
         $freeform = (new FreeformCollector())->collect();
 
         return $this->asJson([

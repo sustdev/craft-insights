@@ -3,61 +3,72 @@
 namespace sustdev\insights\collectors;
 
 use Craft;
-use craft\db\Query;
-use craft\db\Table;
-use craft\queue\Queue as DatabaseQueue;
+use sustdev\insights\jobs\QueueHealthJob;
+use sustdev\insights\Plugin;
 
 /**
- * Queue health: pending and failed counts work on any driver exposing
- * Craft's queue interface; the age of the oldest waiting job needs the
- * database driver (which all monitored sites use).
+ * Queue health, decided here so the platform just stores the verdict. The
+ * signal is a heartbeat: a canary job stamps the cache every few minutes, so
+ * "is the worker draining the queue" becomes "did the canary run recently".
+ * That tells a stalled worker apart from a large but healthy backlog, which a
+ * pending count or oldest-job age never could.
  */
 class QueueCollector
 {
     /**
-     * @return array{pending: int, failed: int, oldestPendingMinutes: int}
+     * @return array{status: string, message: string, pending: int, failed: int, minutesSinceHeartbeat: int|null}
      */
     public function collect(): array
     {
         $queue = Craft::$app->getQueue();
 
+        $pending = method_exists($queue, 'getTotalWaiting') ? (int) $queue->getTotalWaiting() : 0;
+        $failed = method_exists($queue, 'getTotalFailed') ? (int) $queue->getTotalFailed() : 0;
+
+        // Floor at 6 minutes: it must exceed the 5-minute heartbeat interval or
+        // the stamp is always older than the threshold and the check fails
+        // itself. The Settings rule enforces this for CP/programmatic writes,
+        // but a config/insights.php override skips validation, so clamp here.
+        $threshold = max(6, (int) Plugin::getInstance()->getSettings()->queueStallMinutes);
+        $beat = Craft::$app->getCache()->get(QueueHealthJob::CACHE_KEY);
+        $secondsSince = $beat === false ? null : max(0, time() - (int) $beat);
+
+        [$status, $message] = $this->verdict($pending, $failed, $threshold, $secondsSince);
+        $minutesSince = $secondsSince === null ? null : intdiv($secondsSince, 60);
+
         return [
-            'pending' => method_exists($queue, 'getTotalWaiting') ? (int) $queue->getTotalWaiting() : 0,
-            'failed' => method_exists($queue, 'getTotalFailed') ? (int) $queue->getTotalFailed() : 0,
-            'oldestPendingMinutes' => $this->oldestPendingMinutes($queue),
+            'status' => $status,
+            'message' => $message,
+            'pending' => $pending,
+            'failed' => $failed,
+            'minutesSinceHeartbeat' => $minutesSince,
         ];
     }
 
-    private function oldestPendingMinutes(mixed $queue): int
+    /**
+     * @return array{0: string, 1: string} The status (ok/warning/failed) and a short message.
+     */
+    private function verdict(int $pending, int $failed, int $threshold, ?int $secondsSince): array
     {
-        if (! $queue instanceof DatabaseQueue) {
-            return 0;
+        // Compare in seconds for a sharp boundary; report whole minutes.
+        $minutes = $secondsSince === null ? null : intdiv($secondsSince, 60);
+
+        // A stalled worker is the worst case: the canary has not run in time,
+        // so nothing in the queue is moving.
+        if ($secondsSince !== null && $secondsSince >= $threshold * 60) {
+            return ['failed', "Queue worker idle for {$minutes}m (limit {$threshold}m); {$pending} pending."];
         }
 
-        try {
-            // The queue table tracks push moments as unix timestamps in
-            // timePushed (there is no dateCreated column). Jobs with a
-            // delay only count once they are ready to run.
-            // Queue::$channel is null by default; Craft's private channel()
-            // falls back to the component id, which is 'queue' for the
-            // default app component.
-            $oldest = (new Query())
-                ->from(Table::QUEUE)
-                ->where([
-                    'channel' => $queue->channel ?? 'queue',
-                    'fail' => false,
-                    'dateReserved' => null,
-                ])
-                ->andWhere('[[timePushed]] + [[delay]] <= :now', [':now' => time()])
-                ->min('[[timePushed]] + [[delay]]');
-
-            if (! $oldest) {
-                return 0;
-            }
-
-            return max(0, (int) floor((time() - (int) $oldest) / 60));
-        } catch (\Throwable) {
-            return 0;
+        if ($failed > 0) {
+            return ['failed', "{$failed} failed jobs."];
         }
+
+        // No stamp yet: a fresh install, or the cache was just cleared. The
+        // canary will run shortly, so this is a heads-up, not an outage.
+        if ($secondsSince === null) {
+            return ['warning', 'No queue heartbeat yet (just installed or cache cleared).'];
+        }
+
+        return ['ok', "Worker active, last heartbeat {$minutes}m ago; {$pending} pending."];
     }
 }
