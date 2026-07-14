@@ -23,13 +23,45 @@ Response:
     "forms": [
         { "handle": "contact", "name": "Contact", "submissions24h": 3, "submissions7d": 18 }
     ],
-    "freeform": { "errors7d": 0 }
+    "freeform": { "errors7d": 0 },
+    "sherlock": {
+        "available": true,
+        "scannedAt": "2026-07-14T22:40:48+00:00",
+        "pass": false,
+        "warning": true,
+        "results": {
+            "fail": { "devMode": "" },
+            "warning": { "cpTrigger": "", "contentSecurityPolicy": "Neither Content-Security-Policy header nor meta tag are set" },
+            "pass": { "httpsFrontEnd": "" }
+        }
+    }
 }
 ```
 
 - `queue`: the plugin decides queue health and reports the verdict (`status`: `ok`, `warning` or `failed`) plus a `message`. The platform stores that directly. `pending`/`failed` are Craft's counts; `minutesSinceHeartbeat` is the age of the last heartbeat (null until the first one runs). See **Queue health** below.
 - `forms` and `freeform.errors7d`: via Freeform when installed (spam and hidden submissions excluded; errors counted from Freeform's log files over the last 7 days). Sites without Freeform report an empty list and 0.
+- `sherlock`: the last security scan, via Sherlock when installed. See **Security scan** below.
 - Wrong or missing secret returns 403; an unconfigured secret returns 503. The platform treats any non-2xx as a failed sync. Logged-in admins can open the endpoint in the browser without the header.
+
+## Security scan
+
+Sherlock runs around 45 security tests (updates, HTTPS, file permissions, headers, control panel settings). This plugin reports its last scan and reaches no verdict of its own, because Sherlock mixes security tests with "you are behind on updates" and only the platform knows which of those it wants to act on, how old a scan may be before it stops counting, and which findings a site has chosen to ignore.
+
+- `available` is `false` on a site without Sherlock, and nothing else is reported. The free Lite edition runs the full scan; only Sherlock's own notification emails need a paid edition.
+- `scannedAt` is when the scan ran, or `null` on a site that has never been scanned. **A pass with an old `scannedAt` is not a healthy site**, so the platform must weigh the age, not just the verdict.
+- `pass` and `warning` are Sherlock's own booleans, passed through untouched.
+- `results` groups the tests into `fail`, `warning` and `pass` as test handle => detail. The handle (`devMode`, `cpTrigger`) is the stable identifier to fingerprint a finding on. The detail is Sherlock's own text and may contain markup, so escape it; never render it as HTML.
+
+### Requesting a scan
+
+```
+POST /actions/insights/metrics/scan
+X-Insights-Secret: {secret}
+```
+
+Sherlock has no scheduler: it only scans when asked. So the platform, which knows how old a scan may be, asks for one when the last scan has aged out. The scan runs on the queue, because it makes its own HTTP requests back to the site and takes seconds.
+
+Answers `202` with `{"queued": true|false}`. `false` means a scan was already waiting on the queue, which is the outcome the caller wanted, not a failure. Unlike the metrics endpoint, this one always requires the secret: an admin session is not enough.
 
 ## Queue health
 
