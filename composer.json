@@ -1,11 +1,14 @@
 {
     "name": "sustdev/craft-insights",
-    "description": "Exposes a metrics endpoint (queue health, form submissions, Freeform errors) for the Sustdev Insights monitoring platform.",
+    "description": "Exposes a metrics endpoint (queue health, form submissions, Freeform errors, security scan) for the Sustdev Insights monitoring platform.",
     "type": "craft-plugin",
     "license": "proprietary",
     "require": {
         "php": "^8.2",
         "craftcms/cms": "^5.0"
+    },
+    "suggest": {
+        "putyourlightson/craft-sherlock": "Reports the last security scan. Without it the endpoint returns sherlock.available = false."
     },
     "autoload": {
         "psr-4": {
