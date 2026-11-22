@@ -70,6 +70,7 @@ A pending count or the age of the oldest job cannot tell a stalled worker apart 
 - `status` is `failed` when the worker has not run the heartbeat for `queueStallMinutes` (default 15), or when there are failed jobs; `warning` when there is no heartbeat yet (fresh install or a just-cleared cache); otherwise `ok`.
 - The threshold is per site. Copy `src/config.php` to `config/insights.php` and set `queueStallMinutes`. Raise it on a site with legitimately long-running jobs.
 - Needs a cache shared between web and worker (file, database, or Redis, not the per-request array cache).
+- On the database queue a heartbeat only schedules the next one when none is waiting, and every re-seed (the metrics endpoint and the optional cron) deletes surplus waiting heartbeats, so a pile-up collapses to one and cannot starve the real jobs.
 
 ### Cron
 
